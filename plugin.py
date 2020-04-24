@@ -39,71 +39,43 @@
 """
 import Domoticz
 import requests
+import pyzm
+import pyzm.api
 
 class API:
 	def __init__(self):
-		self.retryCount = 2
-		self.url = None
-		self.username = None
-		self.password = None
-		self.session = False
+		self.api = None
 		return
 
 	def login(self):
-		self.url = Parameters["Address"]
-		self.username = Parameters["Username"]
-		self.password = Parameters["Password"]
-		try:
-			login = requests.Session()
-			data = {
-				'username': str(self.username),
-				'password': str(self.password),
-				'stateful': '1'
-			}
-			self.session = login.post(self.url + '/api/host/login.json', data=data).cookies
-			Domoticz.Log("Logged in to " + self.url)
-		except requests.exceptions.RequestException as e:
-			Domoticz.Log("Failed to fetch an API key from " + self.url + "! Make sure the URL Address for ZoneMinder is correct.")
-			Domoticz.Debug(e)
-		finally:
-			Domoticz.Debug("API key from " + self.url + ": "+str(self.session))
-
-	def call(self, cmd, params = None):
-		for i in range(self.retryCount):
-			try:
-				response = requests.put(self.url + cmd, params, cookies=self.session)
-				Domoticz.Debug(response.text)
-				Domoticz.Log(" -> " + str(response.status_code))
-				return response.json()
-			except requests.exceptions.RequestException as e:
-				retries = self.retryCount - i
-				Domoticz.Log("Failed to send " + params + " to " + self.url + cmd)
-				Domoticz.Debug(e)
-				Domoticz.Log("Retrying " + str(retries) + "times...")
-				self.login(self.username, self.password, self.url)
-				continue
+		config = {	'apiurl': Parameters["Address"] + '/api', 
+				'user': Parameters["Username"], 
+				'password': Parameters["Password"]
+		}
+		self.api = pyzm.api.ZMApi(config)
+		if (self.api.authenticated):
+			Domoticz.Log("Logged in to " + Parameters["Address"])
+		else:
+			Domoticz.Log("Failed to authenticate at " + Parameters["Address"])
 
 class BasePlugin:
-	enabled = False
 	def __init__(self):
 		self.api = API()
-		self.lastPolled = 0
-		self.pollInterval = 20
 		return
 
 	def onStart(self):
 		Domoticz.Log("onStart called")
 		Domoticz.Heartbeat(30)
 
+		if Parameters["Mode6"] == "Debug":
+			Domoticz.Debugging(1)
+
 		#Login to ZoneMinder
 		self.api.login()
 
 		#Get all existing monitors from ZoneMinder
-		cmd = '/api/monitors.json'
-		monitors = self.api.call(cmd)
-		Domoticz.Debug("Number of found monitors: " + str(len(monitors['monitors'])))
-		Domoticz.Debug(str(len(monitors['monitors'])))
-		Domoticz.Debug(str(monitors))
+		monitors = self.api.api.monitors().list()
+		Domoticz.Debug("Number of found monitors: " + str(len(monitors)))
 
 		#Create Devices for each monitor that was found
 		if len(Devices) == 0:
@@ -112,18 +84,17 @@ class BasePlugin:
 				Domoticz.Device(Name="State",  Unit=1, TypeName="Selector Switch", Switchtype=18, Image=12, Options=Options).Create()
 				Domoticz.Log("Device State with id 1 was created.")
 
-				for monitor in monitors['monitors']:
-					Id = monitor['Monitor']['Id']
-					Name = monitor['Monitor']['Name']
+				for monitor in monitors:
+					Id = str(monitor.id())
+					Name = monitor.name()
 				
 					Options = {"LevelActions": "|||||||","LevelNames": "None|Monitor|Modect|Record|Mocord|Nodect","LevelOffHidden": "True","SelectorStyle": "0"}
 					Domoticz.Device(Name="Monitor "+str(Name)+" Function",  Unit=int(Id+"1"), TypeName="Selector Switch", Switchtype=18, Image=12, Options=Options).Create()
 					Domoticz.Log("Device Monitor "+str(Name)+" Function with id "+str(Id)+"1 was created.")
 					Domoticz.Device(Name="Monitor "+str(Name)+" Status", Unit=int(Id+"2"), Type=17, Switchtype=0).Create()
 					Domoticz.Log("Device Monitor "+str(Name)+" Status with id "+str(Id)+"2 was created.")
-
-		if Parameters["Mode6"] == "Debug":
-			Domoticz.Debugging(1)
+					Domoticz.Device(Name="Monitor "+str(Name)+" Alarm", Unit=int(Id+"3"), Type=17, Switchtype=0).Create()
+					Domoticz.Log("Device Monitor "+str(Name)+" Alarm with id "+str(Id)+"3 was created.")
 
 
 	def onStop(self):
@@ -141,54 +112,53 @@ class BasePlugin:
 		function = int(Unit % 10)
 		if Unit == 1:
 			if Level == 10:
-				cmd = '/api/states/change/start.json'
-				self.api.call(cmd)
-			
+				self.api.api.start()
 			if Level == 20:
-				cmd = '/api/states/change/stop.json'
-				self.api.call(cmd)
-			
+				self.api.api.stop()
 			if Level == 30:
-				cmd = '/api/states/change/restart.json'
-				self.api.call(cmd)
+				self.api.api.restart()
 
 		if Unit > 1:
 			if function == 1:
-				cmd = '/api/monitors/'+str(monitorId)+'.json'
 				if Level == 0:
-					params = {'Monitor[Function]' : 'None'}
-					self.api.call(cmd, params)
+					params = {'function' : 'None'}
+					self.api.api.monitors().list()[monitorId - 1].set_parameter(params)
 					Devices[Unit].Update(1,str(0))
 				if Level == 10:
-					params = {'Monitor[Function]': 'Monitor'}
-					self.api.call(cmd, params)
+					params = {'function': 'Monitor'}
+					self.api.api.monitors().list()[monitorId - 1].set_parameter(params)
 					Devices[Unit].Update(1,str(10))
 				if Level == 20:
-					params = {'Monitor[Function]':'Modect'}
-					self.api.call(cmd, params)
+					params = {'function':'Modect'}
+					self.api.api.monitors().list()[monitorId - 1].set_parameter(params)
 					Devices[Unit].Update(1,str(20))
 				if Level == 30:
-					params = {'Monitor[Function]':'Record'}
-					self.api.call(cmd, params)
+					params = {'function':'Record'}
+					self.api.api.monitors().list()[monitorId - 1].set_parameter(params)
 					Devices[Unit].Update(1,str(30))
 				if Level == 40:
-					params = {'Monitor[Function]':'Mocord'}
-					self.api.call(cmd, params)
+					params = {'function':'Mocord'}
+					self.api.api.monitors().list()[monitorId - 1].set_parameter(params)
 					Devices[Unit].Update(1,str(40))
 				if Level == 50:
-					params = {'Monitor[Function]':'Nodect'}
-					self.api.call(cmd, params)
+					params = {'function':'Nodect'}
+					self.api.api.monitors().list()[monitorId - 1].set_parameter(params)
 					Devices[Unit].Update(1,str(50))
 			if function == 2:
-				cmd = '/api/monitors/'+str(monitorId)+'.json'
 				if Command == "On":
-					params = {'Monitor[Enabled]':'1'}
-					self.api.call(cmd, params)
+					params = {'enabled': True}
+					self.api.api.monitors().list()[monitorId - 1].set_parameter(params)
 					Devices[Unit].Update(nValue=1, sValue="On", TimedOut=0)
-				
 				if Command == "Off":
-					params = {'Monitor[Enabled]':'0'}
-					self.api.call(cmd, params)
+					params = {'enabled': False}
+					self.api.api.monitors().list()[monitorId - 1].set_parameter(params)
+					Devices[Unit].Update(nValue=0, sValue="Off", TimedOut=0)			
+			if function == 3:
+				if Command == "On":
+					self.api.api.monitors().list()[monitorId - 1].arm()
+					Devices[Unit].Update(nValue=1, sValue="On", TimedOut=0)
+				if Command == "Off":
+					self.api.api.monitors().list()[monitorId - 1].disarm()
 					Devices[Unit].Update(nValue=0, sValue="Off", TimedOut=0)			
 
 	def onNotification(self, Name, Subject, Text, Status, Priority, Sound, ImageFile):
@@ -199,15 +169,11 @@ class BasePlugin:
 
 	def onHeartbeat(self):
 		Domoticz.Log("onHeartbeat called")
-		self.lastPolled = self.lastPolled + 1
-		if self.lastPolled > self.pollInterval:
-			self.lastPolled = 0
-			#Maintain a connection
-			self.api.login()
-			#Retry to add devices if non exists
-			if (len(Devices) == 0):
-				Domoticz.Debug("No devices found! Retrying to add devices...")
-				self.onStart()
+		# Check the status of the devices
+		# If no devices are found, re-determine if new devices are added
+		#	if (len(Devices) == 0):
+		#		Domoticz.Debug("No devices found! Retrying to add devices...")
+		#		self.onStart()
 
 global _plugin
 _plugin = BasePlugin()
@@ -244,7 +210,7 @@ def onHeartbeat():
     global _plugin
     _plugin.onHeartbeat()
 
-	# Generic helper functions
+# Generic helper functions
 def DumpConfigToLog():
 	for x in Parameters:
 		if Parameters[x] != "":
