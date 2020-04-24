@@ -167,8 +167,17 @@ class BasePlugin:
 	def onDisconnect(self, Connection):
 		Domoticz.Log("onDisconnect called")
 
+	def _isRunning(self):
+		url = self.api.api.api_url + '/host/daemonCheck.json'
+		result = self.api.api._make_request(url=url)
+		return result.get('result', 0) != 0
+		
 	def onHeartbeat(self):
 		Domoticz.Log("onHeartbeat called")
+		if self._isRunning():
+			Devices[1].Update(1, str(0))
+		else:
+			Devices[1].Update(0, str(10))
 		# Check the status of the devices
 		# If no devices are found, re-determine if new devices are added
 		#	if (len(Devices) == 0):
