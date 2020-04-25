@@ -178,11 +178,36 @@ class BasePlugin:
 			Devices[1].Update(1, str(0))
 		else:
 			Devices[1].Update(0, str(10))
+			
 		# Check the status of the devices
 		# If no devices are found, re-determine if new devices are added
 		#	if (len(Devices) == 0):
 		#		Domoticz.Debug("No devices found! Retrying to add devices...")
 		#		self.onStart()
+
+		#Get an updated status of all existing monitors from ZoneMinder
+		options = {'force_reload': True }
+		monitors = self.api.api.monitors(options=options).list()
+		#Create Devices for each monitor that was found
+		if monitors != None and len(monitors) > 0:
+			for monitor in monitors:
+				Id = monitor.id()
+				Name = monitor.name()
+				
+				selectors = {'None': (1, '0'), 'Monitor': (1, '10'), 'Modect': (1, '20'), 'Record': (1, '30'), 'Mocord': (1, '40'), 'Nodect': (1, '50')}
+				function = monitor.function()
+				selected = selectors.get(function, None)
+				if selected != None:
+					Devices[Id * 10 + 1].Update(selected[0], selected[1])
+				
+				if monitor.enabled():
+					Devices[Id * 10 + 2].Update(nValue=1, sValue="On", TimedOut=0)
+				else:
+					Devices[Id * 10 + 2].Update(nValue=0, sValue="Off", TimedOut=0)
+
+				# Not sure yet how to determine if an alarm is present
+				# Domoticz.Device(Name="Monitor "+str(Name)+" Alarm", Unit=int(Id+"3"), Type=17, Switchtype=0).Create()
+				# Domoticz.Log("Device Monitor "+str(Name)+" Alarm with id "+str(Id)+"3 was created.")
 
 global _plugin
 _plugin = BasePlugin()
