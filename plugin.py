@@ -75,26 +75,32 @@ class BasePlugin:
 
 		#Get all existing monitors from ZoneMinder
 		monitors = self.api.api.monitors().list()
-		Domoticz.Debug("Number of found monitors: " + str(len(monitors)))
+		mon_count = 0
+		if monitors != None:
+			mon_count = len(monitors)
+		Domoticz.Debug("Number of found monitors: " + str(mon_count))
 
 		#Create Devices for each monitor that was found
 		if len(Devices) == 0:
-			if (len(monitors) > 0):
-				Options = {"LevelActions": "||||","LevelNames": "Start|Stop|Restart","LevelOffHidden": "True","SelectorStyle": "0"}
-				Domoticz.Device(Name="State",  Unit=1, TypeName="Selector Switch", Switchtype=18, Image=12, Options=Options).Create()
-				Domoticz.Log("Device State with id 1 was created.")
+			Options = {"LevelActions": "||||","LevelNames": "Start|Stop|Restart","LevelOffHidden": "True","SelectorStyle": "0"}
+			Domoticz.Device(Name="State",  Unit=1, TypeName="Selector Switch", Switchtype=18, Image=12, Options=Options).Create()
+			Domoticz.Log("Device State with id 1 was created.")
 
+			if (mon_count > 0):
 				for monitor in monitors:
-					Id = str(monitor.id())
+					Id = monitor.id()
 					Name = monitor.name()
 				
 					Options = {"LevelActions": "|||||||","LevelNames": "None|Monitor|Modect|Record|Mocord|Nodect","LevelOffHidden": "True","SelectorStyle": "0"}
-					Domoticz.Device(Name="Monitor "+str(Name)+" Function",  Unit=int(Id+"1"), TypeName="Selector Switch", Switchtype=18, Image=12, Options=Options).Create()
-					Domoticz.Log("Device Monitor "+str(Name)+" Function with id "+str(Id)+"1 was created.")
-					Domoticz.Device(Name="Monitor "+str(Name)+" Status", Unit=int(Id+"2"), Type=17, Switchtype=0).Create()
-					Domoticz.Log("Device Monitor "+str(Name)+" Status with id "+str(Id)+"2 was created.")
-					Domoticz.Device(Name="Monitor "+str(Name)+" Alarm", Unit=int(Id+"3"), Type=17, Switchtype=0).Create()
-					Domoticz.Log("Device Monitor "+str(Name)+" Alarm with id "+str(Id)+"3 was created.")
+					Unit = Id * 10 + 1
+					Domoticz.Device(Name="Monitor "+ Name +" Function", Unit=Unit, TypeName="Selector Switch", Switchtype=18, Image=12, Options=Options).Create()
+					Domoticz.Log("Device Monitor "+ Name +" Function with id "+ str(Unit) +" was created.")
+					Unit = Id * 10 + 2
+					Domoticz.Device(Name="Monitor "+ Name +" Status", Unit=Unit, Type=17, Switchtype=0).Create()
+					Domoticz.Log("Device Monitor "+ Name +" Status with id "+str(Unit)+" was created.")
+					Unit = Id * 10 + 3
+					Domoticz.Device(Name="Monitor "+ Name +" Alarm", Unit=Unit, Type=17, Switchtype=0).Create()
+					Domoticz.Log("Device Monitor "+ Name +" Alarm with id "+str(Unit)+" was created.")
 
 
 	def onStop(self):
@@ -107,7 +113,7 @@ class BasePlugin:
 		Domoticz.Log("onMessage called")
 
 	def onCommand(self, Unit, Command, Level, Hue):
-		Domoticz.Log("onCommand called for Unit " + str(Unit) + ": Parameter '" + str(Command) + "', Level: " + str(Level))
+		Domoticz.Log("onCommand called for Unit " + str(Unit) + ": Parameter '" + Command + "', Level: " + str(Level))
 		monitorId = int(Unit / 10)
 		function = int(Unit % 10)
 		if Unit == 1:
@@ -150,7 +156,7 @@ class BasePlugin:
 					self.api.api.monitors().list()[monitorId - 1].set_parameter(params)
 					Devices[Unit].Update(nValue=1, sValue="On", TimedOut=0)
 				if Command == "Off":
-					params = {'enabled': False}
+					params = { 'raw': {'Monitor[Enabled]': '0' }}
 					self.api.api.monitors().list()[monitorId - 1].set_parameter(params)
 					Devices[Unit].Update(nValue=0, sValue="Off", TimedOut=0)			
 			if function == 3:
