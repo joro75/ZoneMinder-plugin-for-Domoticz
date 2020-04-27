@@ -41,16 +41,40 @@ import Domoticz
 import requests
 import pyzm
 import pyzm.api
+import pyzm.ZMEventNotification
 
+class DomoticzLogger:
+	'pyzm compatible logger that forwards it to the Domoticz log'
+	def __init__(self):
+		pass
+
+	def Debug(self, level, message, caller=None):
+		Domoticz.Debug('[DEBUG {}] {}'.format(level, message))
+		
+	def Info(self, message, caller=None):
+		Domoticz.Log('[INFO] {}'.format(message))
+
+	def Error(self, message, caller=None):
+		Domoticz.Error('[ERROR] {}'.format(message))
+
+	def Fatal(self, message, caller=None):
+		Domoticz.Error('[FATAL] {}'.format(message))
+
+	def Panic(self, message, caller=None):
+		Domoticz.Error('[PANIC] {}'.format(message))
+        
 class API:
 	def __init__(self):
 		self.api = None
+		self.ES = None
+		self._escallback = None
 		return
 
-	def login(self):
+	def login(self, escallback = None):
 		config = {	'apiurl': Parameters["Address"] + '/api', 
 				'user': Parameters["Username"], 
-				'password': Parameters["Password"]
+				'password': Parameters["Password"],
+				'logger': DomoticzLogger()
 		}
 		self.api = pyzm.api.ZMApi(config)
 		if (self.api.authenticated):
@@ -58,6 +82,20 @@ class API:
 		else:
 			Domoticz.Log("Failed to authenticate at " + Parameters["Address"])
 
+		self._escallback = escallback
+		if self._escallback != None:
+			es_config = {
+					'url':'ws://192.168.178.108:9000',
+					'user': Parameters["Username"],
+					'password': Parameters["Password"],
+					'on_es_message': lambda msg: self._escallback(msg),
+					'logger': DomoticzLogger()
+			}
+			self.ES = pyzm.ZMEventNotification.ZMEventNotification(es_config)
+	def logout(self):
+		if self.ES != None:
+			self.ES.disconnect()
+		
 class BasePlugin:
 	def __init__(self):
 		self.api = API()
@@ -71,7 +109,7 @@ class BasePlugin:
 			Domoticz.Debugging(1)
 
 		#Login to ZoneMinder
-		self.api.login()
+		self.api.login(lambda msg: self._escallback(msg))
 
 		#Get all existing monitors from ZoneMinder
 		monitors = self.api.api.monitors().list()
@@ -105,6 +143,7 @@ class BasePlugin:
 
 	def onStop(self):
 		Domoticz.Log("onStop called")
+		self.api.logout()
 
 	def onConnect(self, Connection, Status, Description):
 		Domoticz.Log("onConnect called")
@@ -166,6 +205,20 @@ class BasePlugin:
 				if Command == "Off":
 					self.api.api.monitors().list()[monitorId - 1].disarm()
 					Devices[Unit].Update(nValue=0, sValue="Off", TimedOut=0)			
+
+	def _escallback(self, message):
+		Domoticz.Log("ZM ES: Notification: " + str(message))
+		if message.get('event') == 'alarm':
+			events = message.get('events')
+			if events != None:
+				for anEvent in events:
+					cause = anEvent.get('Cause', '')
+					id = anEvent.get('MonitorId', '')
+					if len(cause) and len(id):
+						alarm = (1, "On")
+						if cause[0:4].upper() == 'END:':
+							alarm = (0, "Off")
+						Devices[int(id) * 10 + 3].Update(nValue=alarm[0], sValue=alarm[1], TimedOut=0)
 
 	def onNotification(self, Name, Subject, Text, Status, Priority, Sound, ImageFile):
 		Domoticz.Log("Notification: " + Name + "," + Subject + "," + Text + "," + Status + "," + str(Priority) + "," + Sound + "," + ImageFile)
